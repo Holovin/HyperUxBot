@@ -17,6 +17,7 @@ const RateLimit = require('./helpers/rateLimit').RateLimit;
 const RateConst = require('./helpers/rateLimit').RateConst;
 const Moment = require('moment');
 const getUserDisplayName = require('./helpers/getUserDisplayName');
+const markdownEscape = require('./helpers/markdownEscape');
 
 // db
 const sequelize = new Sequelize(process.env.DB_NAME, process.env.DB_USER, process.env.DB_PASS, {
@@ -46,14 +47,16 @@ sequelize.sync({force: false}).then(bot_ready);
 function bot_ready() {
     // INIT BLOCK
     const settings = require('./settings');
-    const rateLimit = new RateLimit(process.env.FREQ_LIMIT);
     const bot = new Telegraf(process.env.BOT_TOKEN);
 
     bot.telegram.getMe().then((botInfo) => {
         bot.options.username = botInfo.username
     });
 
-    // Session?
+    // ru-ru
+    Moment.locale('ru');
+
+    // Session
     bot.use(Session());
 
     // Init
@@ -162,7 +165,7 @@ function bot_ready() {
             user.rating = Math.round(user.total_len / user.total);
         }
 
-        const answer = `Ваш рейтинг чисто = ${currentUser.rating} (сбщ: ${currentUser.total}, сткр: ${currentUser.sticker}, вйсв: ${currentUser.voice})`;
+        const answer = `Ваш рейтинг = ${user.rating} (сбщ: ${user.total}, сткр: ${user.sticker}, вйсв: ${user.voice})`;
         await request.reply(answer, Extra.inReplyTo(request.update.message.message_id));
     });
 
@@ -175,8 +178,9 @@ function bot_ready() {
         const [, findUsername] = request.message.text.split(' ');
 
         if (!findUsername) {
-            await request.reply('\u{1F46E} Пустой ник. Для использования команды пишите: \n`/when имя_пользователя`',
-                Extra.inReplyTo(request.update.message.message_id).markdown(true));
+            const answer = '\u{1F46E} Пустой ник. Для использования команды пишите: \n`/when имя_пользователя`';
+            await request.reply(answer, Extra.inReplyTo(request.update.message.message_id).markdown(true));
+
             return;
         }
 
@@ -185,16 +189,20 @@ function bot_ready() {
         });
 
         if (!resultUser) {
-            await request.reply(`\u{1F46E} Нет записей по юзеру (${findUsername}).`, Extra.inReplyTo(request.update.message.message_id));
+            const answer = `\u{1F46E} Нет записей по юзеру *${findUsername}*`;
+            await request.reply(answer, Extra.inReplyTo(request.update.message.message_id));
+
             return;
         }
 
-        const answer = `\u{1F46E} Юзер ${findUsername} был последний раз ${Moment(resultUser.updatedAt).format('(DD/MM/YYYY hh:mm:ss)')}`;
-        await request.reply(answer, Extra.inReplyTo(request.update.message.message_id));
+        const answer = `\u{1F46E} *${markdownEscape(findUsername)}* был последний раз: ${Moment(resultUser.updatedAt).fromNow()}`;
+        await request.reply(answer, Extra
+            .markdown(true)
+            .inReplyTo(request.update.message.message_id));
     });
 
     // Gay :: reg
-    bot.command(['pidor', 'pidor_start'], async (request) => {
+    bot.command(['gay', 'gay_start'], async (request) => {
         if (!request.session.limit.tryStart(RateConst.DEFAULT)) {
             return;
         }
@@ -218,7 +226,7 @@ function bot_ready() {
     });
 
     // Gay :: stop
-    bot.command('pidor_stop', async (request) => {
+    bot.command('gay_stop', async (request) => {
         if (!request.session.limit.tryStart(RateConst.DEFAULT)) {
             return;
         }
@@ -238,33 +246,6 @@ function bot_ready() {
         await request.reply(answer, Extra.inReplyTo(request.update.message.message_id));
     });
 
-    // Gay :: force
-    bot.command('pidor_force', async (request) => {
-        if (!request.session.limit.tryStart(RateConst.NO_LIMIT)) {
-            return;
-        }
-
-        const [user] = await models.UserGay.findAll({
-            include: [{
-                model: models.User,
-                attributes: ['user_name'],
-            }],
-
-            order: [
-                [Sequelize.fn('RAND')],
-            ],
-
-            limit: 1,
-        });
-
-        if (!user) {
-            return false;
-        }
-
-        const answer = `**Пидор дня:** ${user.user.user_name}`;
-        await request.reply(answer, Extra.inReplyTo(request.update.message.message_id).markdown(true));
-    });
-
     // Greet'er
     bot.on('new_chat_members', async (request) => {
         const newUsers = request.update.message.new_chat_members;
@@ -279,30 +260,37 @@ function bot_ready() {
             usersStr.push(user.username);
         });
 
-        await request.reply(`\u{1F195} Welcome back ${usersStr.join(', ')}!`);
+        const answer = `\u{1F195} Welcome back *${markdownEscape(usersStr.join(', '))}*!`;
+        await request.reply(answer, Extra.markdown(true));
     });
 
     // Bye'er
     bot.on('left_chat_member', async (request) => {
-        debug('111');
-        // TODO: clear tables!
-
         const leftUser = request.update.message.left_chat_member;
 
         if (!leftUser) {
             return;
         }
 
-        debug(leftUser);
+        const user = await models.User.findOne({
+            where: {user_id: leftUser.id},
+        });
 
-        const user = await models.UserGay.findOne({ where: {user_user_id: leftUser.id} });
+        const userGay = await models.UserGay.findOne({
+            where: {user_user_id: leftUser.id},
+        });
 
-        debug(user);
+        if (user) {
+            await user.destroy();
+        }
 
-        await user.destroy();
 
-        const answer = `\u{1F480} Прощай, ${leftUser.username}`;
-        await request.reply(answer);
+        if (userGay) {
+            await userGay.destroy();
+        }
+
+        const answer = `\u{1F480} Прощай, *${markdownEscape(leftUser.username)}* /rip`;
+        await request.reply(answer, Extra.markdown(true));
     });
 
     // Update stats
@@ -330,13 +318,19 @@ function bot_ready() {
 
         // Warn if user change display name
         if (user.user_name !== userNameDisplay) {
-            await request.reply(`\u{1F575} Пользователь ${request.from.username} сменил имя [${user.user_name}] >>> [${userNameDisplay}]\n#hyperux`);
+            const answer = `\u{1F575} Пользователь *${markdownEscape(request.from.username)}* сменил имя` +
+                `[${markdownEscape(user.user_name)}] >>> [${markdownEscape(userNameDisplay)}]\n#hyperux`;
+
+            await request.reply(answer, Extra.markdown(true));
             user.user_name = userNameDisplay;
         }
 
         // Warn if user change login name
         if (user.user_login !== request.from.username) {
-            await request.reply(`\u{1F575} Пользователь ${user.user_login} сменил имя на ${request.from.username}\n#hyperux`);
+            const answer = `\u{1F575} Пользователь *${markdownEscape(user.user_login)} сменил имя на` +
+                `${markdownEscape(request.from.username)}\n#hyperux`;
+
+            await request.reply(answer, Extra.markdown(true));
             user.user_login = request.from.username;
         }
 
@@ -370,6 +364,45 @@ function bot_ready() {
         const keyboard = await getLikeKeyboard();
         await request.editMessageReplyMarkup(keyboard);
     });
+
+    // Gay timer
+    let lastTrigger = Moment();
+    const checkFreq = 60000;
+
+    async function checkTriggers() {
+        debug('Run check...');
+
+        const diff = Moment.duration(Moment().diff(lastTrigger)).asHours();
+
+        // TODO
+        if (diff > 1 && Moment().hours() === 13) {
+            lastTrigger = Moment();
+
+            const [user] = await models.UserGay.findAll({
+                include: [{
+                    model: models.User,
+                    attributes: ['user_name', 'user_id'],
+                }],
+
+                order: [
+                    [Sequelize.fn('RAND')],
+                ],
+
+                limit: 1,
+            });
+
+            if (!user) {
+                return false;
+            }
+
+            const answer = `\u{1F60D} *Пидор дня:* [${markdownEscape(user.user.user_name)}](tg://user?id=${user.user.user_id})`;
+            await bot.telegram.sendMessage(process.env.BOT_CHAT_ID, answer, Extra.markdown(true));
+        }
+
+        setTimeout(checkTriggers, checkFreq);
+    }
+
+    setTimeout(checkTriggers, checkFreq);
 
     // Webhook
     bot.telegram.setWebhook(process.env.WEBHOOK_URL);
