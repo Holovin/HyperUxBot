@@ -28,7 +28,7 @@ const sequelize = new Sequelize(process.env.DB_NAME, process.env.DB_USER, proces
     logging: require('debug')('db'),
 
     pool: {
-        max: 5,
+        max: 40,
         min: 0,
         acquire: 30000,
         idle: 10000
@@ -41,7 +41,7 @@ const models = require('./db/models')(sequelize);
 
 models.UserGay.belongsTo(models.User);
 
-sequelize.sync({force: false}).then(bot_ready);
+sequelize.sync({force: true}).then(bot_ready);
 
 
 function bot_ready() {
@@ -129,7 +129,7 @@ function bot_ready() {
 
         // Count rating
         const newUsers = users.map(user => {
-            user.rating = Math.round(user.total_len / user.total);
+            user.rating = Math.round(user.total_len / 100);
 
             return user;
         });
@@ -162,7 +162,7 @@ function bot_ready() {
         const user = request.session.user;
 
         if (!user.rating) {
-            user.rating = Math.round(user.total_len / user.total);
+            user.rating = Math.round(user.total_len / 100);
         }
 
         const answer = `Ваш рейтинг = ${user.rating} (сбщ: ${user.total}, сткр: ${user.sticker}, вйсв: ${user.voice})`;
@@ -179,7 +179,9 @@ function bot_ready() {
 
         if (!findUsername) {
             const answer = '\u{1F46E} Пустой ник. Для использования команды пишите: \n`/when имя_пользователя`';
-            await request.reply(answer, Extra.inReplyTo(request.update.message.message_id).markdown(true));
+            await request.reply(answer, Extra
+                .markdown(true)
+                .inReplyTo(request.update.message.message_id).markdown(true));
 
             return;
         }
@@ -295,6 +297,8 @@ function bot_ready() {
 
     // Update stats
     bot.on('message', async (request) => {
+        debug('Add counter', request.update, request.updateSubTypes);
+
         const userNameDisplay = getUserDisplayName(request);
         const user = request.session.user;
 
@@ -405,7 +409,7 @@ function bot_ready() {
     setTimeout(checkTriggers, checkFreq);
 
     // Webhook
-    bot.telegram.setWebhook(process.env.WEBHOOK_URL);
+    bot.telegram.setWebhook(process.env.WEBHOOK_URL, null, 40);
     bot.startWebhook('/', null, 3002);
 
     // Error handling
