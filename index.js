@@ -1,6 +1,3 @@
-// const-settings
-const USERS_TOP = 5;
-
 // req
 const debug = require('debug')('hyperux:index');
 const dotenv = require('dotenv').config();
@@ -41,7 +38,7 @@ const models = require('./db/models')(sequelize);
 
 models.UserGay.belongsTo(models.User);
 
-sequelize.sync({force: true}).then(bot_ready);
+sequelize.sync({force: false}).then(bot_ready);
 
 
 function bot_ready() {
@@ -96,10 +93,10 @@ function bot_ready() {
 
     // HELPERS //
     async function getLikeKeyboard() {
-        let setting = await models.User.findOne({ where: {user_id: -1} });
+        let setting = await models.User.findOne({ where: { user_id: -1 } });
 
         if (!setting) {
-            setting = {total: 0};
+            setting = { total: 0 };
         }
 
         return Markup
@@ -121,7 +118,7 @@ function bot_ready() {
 
         const users = await models.User.findAll({
             where: {
-                user_id: { [Sequelize.Op.ne]: -1 },
+                user_id: { [sequelize.Op.ne]: -1 },
             },
 
             order: [ ['total', 'DESC'] ],
@@ -135,17 +132,17 @@ function bot_ready() {
         });
 
         // Prepare answer
-        const lines = [`*hyperUxStats top* ${Moment().format('(DD/MM/YYYY hh:mm:ss)')}`];
+        const lines = [`\u{1F3C6} *Top activity* ${Moment().format('(DD/MM/YYYY hh:mm:ss)')}`];
 
         // Sort users
         newUsers
             .sort((one, two) => {
                 return two.rating - one.rating;
             })
-            .slice(0, USERS_TOP)
+            .slice(0, settings.USERS_TOP_ACTIVE)
             .forEach((user, index) => {
                 lines.push(`${index + 1}. ${user.user_name.slice(0, settings.MAX_NAME_LEN)}` +
-                           ` = ${user.rating} (сбщ: ${user.total}, сткр: ${user.sticker}, вйсв: ${user.voice})`);
+                           ` = ${user.rating} (m: ${user.total}, s: ${user.sticker}, v: ${user.voice})`);
             });
 
         // Like counter
@@ -165,7 +162,7 @@ function bot_ready() {
             user.rating = Math.round(user.total_len / 100);
         }
 
-        const answer = `Ваш рейтинг = ${user.rating} (сбщ: ${user.total}, сткр: ${user.sticker}, вйсв: ${user.voice})`;
+        const answer = `Ваш рейтинг = ${user.rating} (m: ${user.total}, s: ${user.sticker}, v: ${user.voice})`;
         await request.reply(answer, Extra.inReplyTo(request.update.message.message_id));
     });
 
@@ -201,6 +198,55 @@ function bot_ready() {
         await request.reply(answer, Extra
             .markdown(true)
             .inReplyTo(request.update.message.message_id));
+    });
+
+    const words = [
+        'Ты чудо',
+        'Аниме!',
+        'Тебе стоило бы извинится',
+        'Плохо вайпишь =/',
+        'Тыкай быстрее! /wipe',
+        'УХ БЛЯ',
+        '20!8',
+        'Давай давай',
+        'Алё',
+        'Ещё, я хочу ещё!',
+        'NAVI!!!'
+    ];
+
+    // test
+    bot.command('wipe', async (request) => {
+        await request.reply(words[Math.floor(Math.random() * words.length)], Extra.inReplyTo(request.update.message.message_id));
+    });
+
+    // When :: top 10
+    bot.command('afk', async (request) => {
+        if (!request.session.limit.tryStart(RateConst.WHEN_USER)) {
+            return;
+        }
+
+        const resultUsers = await models.User.findAll({
+            where: {
+                user_id: { [sequelize.Op.ne]: -1 },
+                updatedAt: { [sequelize.Op.lte]: Moment().subtract(1, 'days').toDate() },
+            },
+            order: [ ['updatedAt', 'ASC'] ],
+
+            limit: settings.USERS_TOP_AFK,
+        });
+
+        if (!resultUsers) {
+            return;
+        }
+
+        const lines = [`\u{23F0} *Top AFK* ${Moment().format('(DD/MM/YYYY hh:mm:ss)')}`];
+
+        resultUsers.forEach((user, index) => {
+            lines.push(`${index + 1}. ${markdownEscape(user.user_name)}: ${Moment(user.updatedAt).fromNow()}`)
+        });
+
+        const keyboard = await getLikeKeyboard();
+        await request.reply(lines.join('\n'), Extra.markup(keyboard).markdown(true));
     });
 
     // Gay :: reg
@@ -322,7 +368,7 @@ function bot_ready() {
 
         // Warn if user change display name
         if (user.user_name !== userNameDisplay) {
-            const answer = `\u{1F575} Пользователь *${markdownEscape(request.from.username)}* сменил имя` +
+            const answer = `\u{1F575} Пользователь *${markdownEscape(request.from.username)}* сменил имя: ` +
                 `[${markdownEscape(user.user_name)}] >>> [${markdownEscape(userNameDisplay)}]\n#hyperux`;
 
             await request.reply(answer, Extra.markdown(true));
@@ -331,7 +377,7 @@ function bot_ready() {
 
         // Warn if user change login name
         if (user.user_login !== request.from.username) {
-            const answer = `\u{1F575} Пользователь *${markdownEscape(user.user_login)} сменил имя на` +
+            const answer = `\u{1F575} Пользователь *${markdownEscape(user.user_login)} сменил имя на: ` +
                 `${markdownEscape(request.from.username)}\n#hyperux`;
 
             await request.reply(answer, Extra.markdown(true));
@@ -399,7 +445,8 @@ function bot_ready() {
                 return false;
             }
 
-            const answer = `\u{1F60D} *Пидор дня:* [${markdownEscape(user.user.user_name)}](tg://user?id=${user.user.user_id})`;
+            const answer = `\u{1F60D} *Пидор дня:* [${markdownEscape(user.user.user_name)}](tg://user?id=${user.user.user_id})` +
+                           `#hyperux_gay`;
             await bot.telegram.sendMessage(process.env.BOT_CHAT_ID, answer, Extra.markdown(true));
         }
 
